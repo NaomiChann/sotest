@@ -28,47 +28,39 @@ typedef struct
 	pthread_t aThread;
 	bool isSleeping;
 	int sleepTimer;
-	int total;
+	int total;;
 } animal_t;
+
+typedef struct
+{
+	int type;
+	int id;
+} message_t;
 
 // GLOBALS
 int timer_g = 0, timeStarting_g = 0, timeCurrent_g = 0, timeNew_g = 0;
 
-pthread_mutex_t mutStorage_g = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutFeeder_g[AMOUNT_FEEDERS] = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutClock_g = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t  condClock_g  = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutControl_g = PTHREAD_MUTEX_INITIALIZER;
 
 animal_t lion_g[4], meerkat_g[10], ostrich_g[7];
 
 // PROTOTYPES
 void Hello();
 void* Routine( void* received );
+void Setter( animal_t *animal );
 void Initializer();
 void ErrorCheck( int error );
+void TimeUpdater();
 void Joiner();
+void Act( message_t animal );
 
 int main()
 {
 	Hello();
 	Initializer();
+	Joiner();
 
-	while ( timer_g < HOURS_DAY ) // loops until simulation time is due
-	{
-		timeNew_g = time( NULL );
-
-		pthread_mutex_lock( &mutClock_g );
-		if ( timeNew_g != timeCurrent_g )
-		{
-			pthread_cond_signal( &condClock_g );
-			timeCurrent_g = timeNew_g;
-			timer_g = timeCurrent_g - timeStarting_g;
-			printf( "Hour %d\n\n", timer_g );
-		}
-		pthread_mutex_unlock( &mutClock_g );
-
-		Joiner();
-	}
+	
 
 	return 0;
 }
@@ -81,24 +73,32 @@ void Hello()
     printf( "\n+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-\n\n" );
 }
 
-
 void* Routine( void* received )
 {
-	int* message = ( int* ) received;
+	message_t message = *( message_t* ) received;
 
-	pthread_mutex_lock( &mutClock_g );
-	while( timeNew_g == timeCurrent_g )
+	while ( timer_g < HOURS_DAY )
 	{
-		pthread_cond_wait( &condClock_g, &mutClock_g );
-	}
-	pthread_mutex_unlock( &mutClock_g );
+		timeNew_g = time( NULL );
+		pthread_mutex_lock( &mutControl_g );
+		if ( timeNew_g != timeCurrent_g )
+		{
+			TimeUpdater();
 
-	if ( timer_g % 3 == 1 )
-	{
-		printf( "thread [%d]: babybaby \n", *message );
+		} else {
+			Act( message );
+		}
+		pthread_mutex_unlock( &mutControl_g );
 	}
 
 	pthread_exit( NULL );
+}
+
+void Setter( animal_t *animal )
+{
+	animal->isSleeping = false;
+	animal->sleepTimer = 4;
+	animal->total = 0;
 }
 
 void Initializer()
@@ -108,28 +108,29 @@ void Initializer()
 	timeStarting_g = time( NULL );
 	timeCurrent_g = time( NULL );
 
-	pthread_mutex_init( &mutStorage_g, NULL );
-	pthread_mutex_init( &mutClock_g, NULL );
-	for ( int i = 0; i < AMOUNT_FEEDERS; ++i )
-	{
-		pthread_mutex_init( &mutFeeder_g[i], NULL );
-	}
+	pthread_mutex_init( &mutControl_g, NULL );
 
 	for( int i = 0; i < POP_LIONS; ++i )
 	{
-		errorCheck = pthread_create( &lion_g[i].aThread, NULL, Routine, ( void* ) LION );
+		message_t message = { .id = i, .type = LION };
+		Setter( &lion_g[i] );
+		errorCheck = pthread_create( &lion_g[i].aThread, NULL, Routine, ( void* ) &message );
 		ErrorCheck( errorCheck );
 	}
 
 	for( int i = 0; i < POP_MEERKATS; ++i )
 	{
-		errorCheck = pthread_create( &meerkat_g[i].aThread, NULL, Routine, ( void* ) LION );
+		message_t message = { .id = i, .type = MEERKAT };
+		Setter( &meerkat_g[i] );
+		errorCheck = pthread_create( &meerkat_g[i].aThread, NULL, Routine, ( void* ) &message );
 		ErrorCheck( errorCheck );
 	}
 
 	for( int i = 0; i < POP_OSTRICHES; ++i )
 	{
-		errorCheck = pthread_create( &ostrich_g[i].aThread, NULL, Routine, ( void* ) LION );
+		message_t message = { .id = i, .type = OSTRICH };
+		Setter( &ostrich_g[i] );
+		errorCheck = pthread_create( &ostrich_g[i].aThread, NULL, Routine, ( void* ) &message );
 		ErrorCheck( errorCheck );
 	}
 }
@@ -142,6 +143,13 @@ void ErrorCheck( int error )
 		printf( "ERROR( %d ) \n", error );
 		exit( -1 );
 	}
+}
+
+void TimeUpdater()
+{
+	timeCurrent_g = timeNew_g;
+	timer_g = timeCurrent_g - timeStarting_g;
+	printf( "Hour %d\n\n", timer_g );
 }
 
 void Joiner()
@@ -159,5 +167,32 @@ void Joiner()
 	for ( int i = 0; i < POP_OSTRICHES; ++i )
 	{
 		pthread_join( ostrich_g[i].aThread, NULL );
+	}
+}
+
+void Act( message_t animal )
+{
+	switch ( animal.type )
+	{
+		case LION:
+			printf( "EAT MEAT \n" );
+			printf( "Lion [%d]: RAWR :3 \n", animal.id );
+			printf( "EAT FLESH \n" );
+			break;
+		
+		case MEERKAT:
+			printf( "EAT LARVAE \n" );
+			printf( "Meerkat [%d]: EEEEE >:( \n", animal.id );
+			printf( "EAT INSECT \n" );
+			break;
+		
+		case OSTRICH:
+			printf( "EAT WEED \n" );
+			printf( "Ostrich [%d]: IWIWIWIWI >//< \n", animal.id );
+			printf( "EAT FLOWER \n" );
+			break;
+		
+		default:
+			break;
 	}
 }

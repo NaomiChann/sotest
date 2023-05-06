@@ -45,7 +45,7 @@ typedef struct
 // GLOBALS
 int timer_g = 0, timeStarting_g = 0, timeCurrent_g = 0, timeNew_g = 0, day_g = 0;
 int storage_g[AMOUNT_FEEDERS], feeder_g[AMOUNT_FEEDERS];
-int looper_g = HOURS_MONTH;
+int looper_g = HOURS_WEEK;
 bool restock_g = false;
 
 pthread_mutex_t mutControl_g = PTHREAD_MUTEX_INITIALIZER;
@@ -118,6 +118,43 @@ void* Routine( void* received )
 			restock_g = true;
 		}
 
+		if ( message.type == VET )
+		{
+			for ( int i = 0; i < AMOUNT_FEEDERS; ++i )
+			{
+				if ( feeder_g[i] < MAX_FOOD )
+				{
+					if( storage_g[i] > 0 )
+					{
+						--storage_g[i];
+						++feeder_g[i];
+					
+						printf( "Vet [%d] gave food to ", message.id );
+
+						switch ( i )
+						{
+							case LION:
+								printf( "the lions " );
+								break;
+
+							case MEERKAT:
+								printf( "the meerkats " );
+								break;
+
+							case OSTRICH:
+								printf( "the ostriches " );
+								break;
+							
+							default:
+								break;
+						}
+					
+						printf( "( currently at %d units ) \n\n", feeder_g[i] );
+					}
+				}
+			}
+		}
+
 		switch ( message.type )
 		{
 			case LION:
@@ -141,54 +178,19 @@ void* Routine( void* received )
 				}
 				break;
 
-			case VET:
-				for ( int i = 0; i < AMOUNT_FEEDERS; ++i )
+			case SUPPLIER:
+				if ( restock_g )
 				{
-					if ( feeder_g[i] < MAX_FOOD && storage_g[i] > 0 )
-					{
-						--storage_g[i];
-						++feeder_g[i];
-						
-						printf( "Vet [%d] gave food to ", message.id );
-
-						switch ( i )
-						{
-							case LION:
-								printf( "the lions " );
-								break;
-
-							case MEERKAT:
-								printf( "the meerkats " );
-								break;
-
-							case OSTRICH:
-								printf( "the ostriches " );
-								break;
-							
-							default:
-								break;
-						}
-						
-						printf( "( currently at %d units ) \n\n", feeder_g[i] );
-						break;
-					}
+					storage_g[LION] = MAX_STORAGE;
+					storage_g[MEERKAT] = MAX_STORAGE;
+					storage_g[OSTRICH] = MAX_STORAGE;
+					restock_g = false;
+					printf( "Storage restocked \n\n" );
 				}
 				break;
-
-				case SUPPLIER:
-					if ( restock_g )
-					{
-						storage_g[LION] = MAX_STORAGE;
-						storage_g[MEERKAT] = MAX_STORAGE;
-						storage_g[OSTRICH] = MAX_STORAGE;
-						restock_g = false;
-						printf( "Storage restocked \n\n" );
-					}
-					break;
 				
-				default:
-					fputs( "ERROR: WHAT?? \n\n", stderr );
-					break;
+			default:
+				break;
 		}
 		pthread_mutex_unlock( &mutControl_g );
 	}
@@ -276,7 +278,7 @@ void TimeUpdater()
 {
 	timeCurrent_g = timeNew_g;
 	timer_g = timeCurrent_g - timeStarting_g;
-	printf( "Day %d, Hour %d\n\n", day_g, timer_g - ( day_g * 24 ) + 1 );
+	printf( "Day %d, Hour %d\n\n", day_g, timer_g );
 }
 
 void Joiner()
@@ -381,15 +383,15 @@ void Act( message_t animal )
 
 int Eat( int* food, animal_t* animal, message_t message )
 {
-	if ( *food > storage_g[message.type] ) {
-		printf( "i wanted more :( ( %d/%d units ) \n", storage_g[message.type], *food );
-		*food = storage_g[message.type];
+	if ( *food > feeder_g[message.type] ) {
+		printf( "i wanted more :( ( %d/%d units ) \n", feeder_g[message.type], *food );
+		*food = feeder_g[message.type];
 		animal->total += *food;
-		storage_g[message.type] = 0;
+		feeder_g[message.type] = 0;
 		return 0;
 	} else {
 		animal->total += *food;
-		storage_g[message.type] -= *food;
+		feeder_g[message.type] -= *food;
 		return 1;
 	}
 	return 1;

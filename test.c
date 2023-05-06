@@ -7,11 +7,10 @@
 #include <unistd.h>
 
 #define HOURS_DAY			24
-/*
 #define HOURS_WEEK			168
 #define HOURS_MONTH			720
 #define HOURS_SEMESTER		4320
-*/
+
 #define POP_LIONS			4
 #define POP_MEERKATS		10
 #define POP_OSTRICHES		7
@@ -44,8 +43,9 @@ typedef struct
 } message_t;
 
 // GLOBALS
-int timer_g = 0, timeStarting_g = 0, timeCurrent_g = 0, timeNew_g = 0;
+int timer_g = 0, timeStarting_g = 0, timeCurrent_g = 0, timeNew_g = 0, day_g = 0;
 int storage_g[AMOUNT_FEEDERS], feeder_g[AMOUNT_FEEDERS];
+int looper_g = HOURS_MONTH;
 bool restock_g = false;
 
 pthread_mutex_t mutControl_g = PTHREAD_MUTEX_INITIALIZER;
@@ -67,6 +67,7 @@ void Act( message_t animal );
 int Eat( int* food, animal_t* animal, message_t message );
 void Counter();
 void Restarter();
+void Sleeper();
 
 int main()
 {
@@ -94,7 +95,7 @@ void* Routine( void* received )
 {
 	message_t message = *( message_t* ) received;
 
-	while ( timer_g <= HOURS_DAY )
+	while ( timer_g <= looper_g )
 	{
 		timeNew_g = time( NULL );
 
@@ -102,33 +103,39 @@ void* Routine( void* received )
 		if ( timeNew_g != timeCurrent_g )
 		{
 			TimeUpdater();
-			Restarter();
+			Sleeper();
+			if ( timer_g % 24 == 0 && timer_g != 0 )
+			{
+				++day_g;
+				Restarter();
+				printf( "Dawn of the day %d \n\n\n", day_g );
+			}
 		}
 
 		if ( !restock_g && ( storage_g[LION] == 0 || storage_g[MEERKAT] == 0 || storage_g[OSTRICH] == 0 ) )
 		{
-			printf( "Asked for restocking" );
+			printf( "Asked for restocking \n" );
 			restock_g = true;
 		}
 
 		switch ( message.type )
 		{
 			case LION:
-				if ( lion_g[message.id].actions > 0 ) {
+				if ( lion_g[message.id].actions > 0 && lion_g[message.id].sleepTimer == 0 ) {
 					Act( message );
 					--lion_g[message.id].actions;
 				}
 				break;
 			
 			case MEERKAT:
-				if ( lion_g[message.id].actions > 0 ) {
+				if ( meerkat_g[message.id].actions > 0 && meerkat_g[message.id].sleepTimer == 0 ) {
 					Act( message );
 					--meerkat_g[message.id].actions;
 				}
 				break;
 
 			case OSTRICH:
-				if ( lion_g[message.id].actions > 0 ) {
+				if ( ostrich_g[message.id].actions > 0 && ostrich_g[message.id].sleepTimer == 0 ) {
 					Act( message );
 					--ostrich_g[message.id].actions;
 				}
@@ -269,7 +276,7 @@ void TimeUpdater()
 {
 	timeCurrent_g = timeNew_g;
 	timer_g = timeCurrent_g - timeStarting_g;
-	printf( "Hour %d\n\n", timer_g );
+	printf( "Day %d, Hour %d\n\n", day_g, timer_g - ( day_g * 24 ) + 1 );
 }
 
 void Joiner()
@@ -421,5 +428,32 @@ void Restarter()
 	for ( int i = 0; i < POP_OSTRICHES; ++i )
 	{
 		ostrich_g[i].actions = 2;
+	}
+}
+
+void Sleeper()
+{
+	for ( int i = 0; i < POP_LIONS; ++i )
+	{
+		if ( lion_g[i].sleepTimer > 0 )
+		{
+			--lion_g[i].sleepTimer;
+		}
+	}
+
+	for ( int i = 0; i < POP_MEERKATS; ++i )
+	{
+		if ( meerkat_g[i].sleepTimer > 0 )
+		{
+			--meerkat_g[i].sleepTimer;
+		}
+	}
+
+	for ( int i = 0; i < POP_OSTRICHES; ++i )
+	{
+		if ( ostrich_g[i].sleepTimer > 0 )
+		{
+			--ostrich_g[i].sleepTimer;
+		}
 	}
 }

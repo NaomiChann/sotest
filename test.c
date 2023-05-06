@@ -46,11 +46,14 @@ typedef struct
 // GLOBALS
 int timer_g = 0, timeStarting_g = 0, timeCurrent_g = 0, timeNew_g = 0;
 int storage_g[AMOUNT_FEEDERS], feeder_g[AMOUNT_FEEDERS];
+bool restock_g = false;
 
 pthread_mutex_t mutControl_g = PTHREAD_MUTEX_INITIALIZER;
 
 animal_t lion_g[POP_LIONS], meerkat_g[POP_MEERKATS], ostrich_g[POP_OSTRICHES];
 pthread_t vet_g[POP_VETS], supplier_g;
+
+struct sched_param param_g;
 
 // PROTOTYPES
 void Hello();
@@ -61,12 +64,14 @@ void ErrorCheck( int error );
 void TimeUpdater();
 void Joiner();
 void Act( message_t animal );
-void Eat( int* food, animal_t* animal, message_t message );
+int Eat( int* food, animal_t* animal, message_t message );
 void Counter();
+void Restarter();
 
 int main()
 {
 	message_t* messages = ( message_t* ) malloc( sizeof( message_t ) * SIZE_ALL );
+	param_g.sched_priority = SCHED_FIFO;
 	Hello();
 	Initializer( messages );
 	Joiner();
@@ -88,7 +93,6 @@ void Hello()
 void* Routine( void* received )
 {
 	message_t message = *( message_t* ) received;
-	bool restock = false;
 
 	while ( timer_g <= HOURS_DAY )
 	{
@@ -98,45 +102,33 @@ void* Routine( void* received )
 		if ( timeNew_g != timeCurrent_g )
 		{
 			TimeUpdater();
-
+			Restarter();
 		}
 
-		if ( message.type == SUPPLIER && restock )
+		if ( !restock_g && ( storage_g[LION] == 0 || storage_g[MEERKAT] == 0 || storage_g[OSTRICH] == 0 ) )
 		{
-			storage_g[LION] = MAX_STORAGE;
-			storage_g[MEERKAT] = MAX_STORAGE;
-			storage_g[OSTRICH] = MAX_STORAGE;
-			restock = false;
-			printf( "Storage restocked \n\n" );
+			printf( "Asked for restocking" );
+			restock_g = true;
 		}
 
 		switch ( message.type )
 		{
 			case LION:
-				if ( lion_g[message.id].sleepTimer > 0 )
-				{
-					--lion_g[message.id].sleepTimer;
-				} else if ( lion_g[message.id].actions > 0 ) {
+				if ( lion_g[message.id].actions > 0 ) {
 					Act( message );
 					--lion_g[message.id].actions;
 				}
 				break;
 			
 			case MEERKAT:
-				if ( meerkat_g[message.id].sleepTimer > 0 )
-				{
-					--meerkat_g[message.id].sleepTimer;
-				} else if ( lion_g[message.id].actions > 0 ) {
+				if ( lion_g[message.id].actions > 0 ) {
 					Act( message );
 					--meerkat_g[message.id].actions;
 				}
 				break;
 
 			case OSTRICH:
-				if ( ostrich_g[message.id].sleepTimer > 0 )
-				{
-					--ostrich_g[message.id].sleepTimer;
-				} else if ( lion_g[message.id].actions > 0 ) {
+				if ( lion_g[message.id].actions > 0 ) {
 					Act( message );
 					--ostrich_g[message.id].actions;
 				}
@@ -171,17 +163,26 @@ void* Routine( void* received )
 						}
 						
 						printf( "( currently at %d units ) \n\n", feeder_g[i] );
-					}
-
-					if ( storage_g[i] == 0 && !restock )
-					{
-						printf( "Vet [%d] asked for restocking", message.id );
-						restock = true;
+						break;
 					}
 				}
 				break;
+
+				case SUPPLIER:
+					if ( restock_g )
+					{
+						storage_g[LION] = MAX_STORAGE;
+						storage_g[MEERKAT] = MAX_STORAGE;
+						storage_g[OSTRICH] = MAX_STORAGE;
+						restock_g = false;
+						printf( "Storage restocked \n\n" );
+					}
+					break;
+				
+				default:
+					fputs( "ERROR: WHAT?? \n\n", stderr );
+					break;
 		}
-		
 		pthread_mutex_unlock( &mutControl_g );
 	}
 
@@ -303,14 +304,22 @@ void Act( message_t animal )
 	{
 		case LION:
 			food = ( rand() % 4 ) + 2;
-			Eat( &food, &lion_g[animal.id], animal );
-			printf( "Lion [%d]: EAT MEAT ( %d units ) \n", animal.id , food );
+			if ( Eat( &food, &lion_g[animal.id], animal ) != 0 )
+			{
+				printf( "Lion [%d]: EAT MEAT ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Lion [%d]: :( \n", animal.id );
+			}
 
 			printf( "Lion [%d]: RAWR :3 \n", animal.id );
 
 			food = ( rand() % 4 ) + 2;
-			Eat( &food, &lion_g[animal.id], animal );
-			printf( "Lion [%d]: EAT FLESH ( %d units ) \n", animal.id , food );
+			if ( Eat( &food, &lion_g[animal.id], animal ) != 0 )
+			{
+				printf( "Lion [%d]: EAT FLESH ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Lion [%d]: :( \n", animal.id );
+			}
 
 			lion_g[animal.id].sleepTimer = ( rand() % 5 ) + 8;
 			printf( "Lion [%d]: sleepy time uwu ( %d hours ) \n\n", animal.id, lion_g[animal.id].sleepTimer );
@@ -318,14 +327,20 @@ void Act( message_t animal )
 		
 		case MEERKAT:
 			food = ( rand() % 2 ) + 1;
-			Eat( &food, &meerkat_g[animal.id], animal );
-			printf( "Meerkat [%d]: EAT LARVAE ( %d units ) \n", animal.id , food );
-
-			printf( "Meerkat [%d]: EEEEE >:( \n", animal.id );
+			if ( Eat( &food, &meerkat_g[animal.id], animal ) != 0 )
+			{
+				printf( "Meerkat [%d]: EAT INSECT ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Meerkat [%d]: :( \n", animal.id );
+			}
 
 			food = ( rand() % 2 ) + 1;
-			Eat( &food, &meerkat_g[animal.id], animal );
-			printf( "Meerkat [%d]: EAT INSECT ( %d units ) \n", animal.id , food );
+			if ( Eat( &food, &meerkat_g[animal.id], animal ) != 0 )
+			{
+				printf( "Meerkat [%d]: EAT LARVAE ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Meerkat [%d]: :( \n", animal.id );
+			}
 
 			meerkat_g[animal.id].sleepTimer = ( rand() % 5 ) + 6;
 			printf( "Meerkat [%d]: sleepy time uwu ( %d hours ) \n\n", animal.id, meerkat_g[animal.id].sleepTimer );
@@ -333,14 +348,20 @@ void Act( message_t animal )
 		
 		case OSTRICH:
 			food = ( rand() % 3 ) + 2;
-			Eat( &food, &ostrich_g[animal.id], animal );
-			printf( "Ostrich [%d]: EAT WEED ( %d units ) \n", animal.id , food );
-
-			printf( "Ostrich [%d]: IWIWIWIWI >//< \n", animal.id );
+			if ( Eat( &food, &ostrich_g[animal.id], animal ) != 0 )
+			{
+				printf( "Ostrich [%d]: EAT WEED ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Ostrich [%d]: :( \n", animal.id );
+			}
 
 			food = ( rand() % 3 ) + 2;
-			Eat( &food, &ostrich_g[animal.id], animal );
-			printf( "Ostrich [%d]: EAT FLOWER ( %d units ) \n", animal.id , food );
+			if ( Eat( &food, &ostrich_g[animal.id], animal ) != 0 )
+			{
+				printf( "Ostrich [%d]: EAT FLOWER ( %d units ) \n", animal.id , food );
+			} else {
+				printf( "Ostrich [%d]: :( \n", animal.id );
+			}
 
 			ostrich_g[animal.id].sleepTimer = ( rand() % 5 ) + 4;
 			printf( "Ostrich [%d]: sleepy time uwu ( %d hours ) \n\n", animal.id, ostrich_g[animal.id].sleepTimer );
@@ -351,17 +372,20 @@ void Act( message_t animal )
 	}
 }
 
-void Eat( int* food, animal_t* animal, message_t message )
+int Eat( int* food, animal_t* animal, message_t message )
 {
 	if ( *food > storage_g[message.type] ) {
 		printf( "i wanted more :( ( %d/%d units ) \n", storage_g[message.type], *food );
 		*food = storage_g[message.type];
 		animal->total += *food;
 		storage_g[message.type] = 0;
+		return 0;
 	} else {
 		animal->total += *food;
 		storage_g[message.type] -= *food;
+		return 1;
 	}
+	return 1;
 }
 
 void Counter()
@@ -379,5 +403,23 @@ void Counter()
 	for ( int i = 0; i < POP_OSTRICHES; ++i )
 	{
 		printf( "Ostrich [%d]: consumed %d units \n", i, ostrich_g[i].total );
+	}
+}
+
+void Restarter()
+{
+	for ( int i = 0; i < POP_LIONS; ++i )
+	{
+		lion_g[i].actions = 2;
+	}
+
+	for ( int i = 0; i < POP_MEERKATS; ++i )
+	{
+		meerkat_g[i].actions = 2;
+	}
+
+	for ( int i = 0; i < POP_OSTRICHES; ++i )
+	{
+		ostrich_g[i].actions = 2;
 	}
 }
